@@ -1,0 +1,6 @@
+{
+  "name": "PurplePrint",
+  "description": "Convert raw Markdown text into beautiful, professionally formatted PDF documents styled with a custom high-contrast Purple & Obsidian design system.",
+  "requestFramePermissions": [],
+  "majorCapabilities": []
+}
