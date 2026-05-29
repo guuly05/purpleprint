@@ -5,7 +5,7 @@
 [![Jetpack Compose](https://img.shields.io/badge/Jetpack%20Compose-4285F4?style=for-the-badge&logo=jetpackcompose&logoColor=white)](https://developer.android.com/jetpack/compose)
 [![Material 3](https://img.shields.io/badge/Material%203-1E88E5?style=for-the-badge&logo=materialdesign&logoColor=white)](https://m3.material.io)
 [![Gradle](https://img.shields.io/badge/Gradle-02303A?style=for-the-badge&logo=gradle&logoColor=white)](https://gradle.org)
-[![License](https://img.shields.io/badge/License-Apache%202.0-green?style=for-the-badge)](LICENSE)
+[![License](https://img.shields.io/badge/License-Apache%202.0-green.svg)](LICENSE)
 
 **PurplePrint** is an offline-first Android Markdown editor and PDF exporter. Write Markdown, preview the rendered document, and export it through Android's native print pipeline – **without ever sending your content to a server**.
 
