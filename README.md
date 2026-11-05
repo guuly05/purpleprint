@@ -9,6 +9,15 @@
 
 **PurplePrint** is an offline-first Android Markdown editor and PDF exporter. Write Markdown, preview the rendered document, and export it through Android's native print pipeline – **without ever sending your content to a server**.
 
+* **Markdown editor and live preview:** Compose Markdown in a focused editor and preview the rendered output immediately.
+* **Responsive layouts:** Uses a split editor/preview workspace on tablets and a tabbed workflow on phones.
+* **Native PDF export:** Generates print-ready documents through Android `PrintManager` and `PdfDocument`.
+* **Private by design:** No internet permission, no cloud conversion, no AI service dependency, and Android backup is disabled.
+* **Material 3 interface:** A polished high-contrast interface with dark/light theme support.
+* **Local draft recovery:** Drafts are saved on-device as you type and restored when the app reopens.
+* **Markdown file workflows:** Import, save, and share Markdown using Android's document and share pickers.
+* **Writing tools:** Formatting shortcuts, word and character counts, search, and heading navigation.
+* **Expanded Markdown blocks:** Multiline paragraphs, task lists, fenced code, quotes, and common list styles.
 ---
 
 ## ✨ Features
@@ -108,6 +117,12 @@ graph TD
 - **Page bounds detection** – A4, Letter, Legal (user‑selected).
 - **Word‑by‑word line wrapping** – uses `Paint` metrics.
 - **Dynamic pagination** – groups content across pages.
+
+* It classifies structural elements (Headings, Paragraphs, List Items, Block Quotes, Code Blocks, and Horizontal Rules).
+* It generates an AST list of `MarkdownBlock` items.
+* Adjacent text lines are joined into paragraphs; task lists, `+` bullets, and `1)` ordered lists are recognized.
+* Unclosed code fences are preserved as code instead of dropping document text.
+* `MarkdownInlineParser.kt` extracts inline styling such as bold, italic, and inline code spans.
 
 ### 3. Native Rendering
 - Android Print Spooler calls `onWrite()`.

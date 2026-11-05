@@ -30,4 +30,21 @@ class ExampleUnitTest {
     assertEquals(MarkdownBlock.HorizontalRule, blocks[5])
     assertEquals(MarkdownBlock.CodeBlock("val answer = 42", "kotlin"), blocks[6])
   }
+
+  @Test
+  fun markdownParser_joinsParagraphsAndRecognizesTasksAndRules() {
+    val blocks = MarkdownParser.parse("First line\ncontinued line\n\n+ [x] done\n- [ ] pending\n\n___")
+    assertEquals(MarkdownBlock.Paragraph("First line continued line"), blocks[0])
+    assertEquals(MarkdownBlock.ListItem(false, 0, "done", true), blocks[1])
+    assertEquals(MarkdownBlock.ListItem(false, 0, "pending", false), blocks[2])
+    assertEquals(MarkdownBlock.HorizontalRule, blocks[3])
+  }
+
+  @Test
+  fun markdownParser_keepsUnclosedCodeFenceContent() {
+    assertEquals(
+      MarkdownBlock.CodeBlock("line one\nline two", "kotlin"),
+      MarkdownParser.parse("```kotlin\nline one\nline two").single()
+    )
+  }
 }
