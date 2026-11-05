@@ -11,6 +11,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.*
@@ -21,6 +22,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
@@ -49,6 +51,10 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardCapitalization
+import androidx.compose.ui.text.input.TextFieldValue
+import androidx.compose.ui.text.TextRange
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -58,6 +64,7 @@ import com.example.pdf.MarkdownPrintAdapter
 import com.example.ui.theme.PurplePrintTheme
 import java.io.BufferedReader
 import java.io.InputStreamReader
+import java.io.OutputStreamWriter
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -104,9 +111,17 @@ fun PurplePrintApp(
     onThemeToggle: () -> Unit
 ) {
     val context = LocalContext.current
-    var markdownText by rememberSaveable { mutableStateOf(DEFAULT_MARKDOWN) }
+    val preferences = remember { context.getSharedPreferences("purpleprint", Context.MODE_PRIVATE) }
+    var markdownText by rememberSaveable { mutableStateOf(preferences.getString("draft", null) ?: DEFAULT_MARKDOWN) }
     var showClearDialog by remember { mutableStateOf(false) }
+    var showFindDialog by remember { mutableStateOf(false) }
+    var showHeadingsDialog by remember { mutableStateOf(false) }
+    var findText by rememberSaveable { mutableStateOf("") }
+    var findSelection by remember { mutableStateOf<Int?>(null) }
+    var actionMenuExpanded by remember { mutableStateOf(false) }
     var activeTab by rememberSaveable { mutableStateOf(0) } // 0 = Editor, 1 = Preview
+
+    LaunchedEffect(markdownText) { preferences.edit().putString("draft", markdownText).apply() }
 
     val configuration = LocalConfiguration.current
     val isTablet = configuration.screenWidthDp >= 600
@@ -121,7 +136,8 @@ fun PurplePrintApp(
                     BufferedReader(InputStreamReader(inputStream)).use { reader ->
                         val importedText = reader.readText()
                         markdownText = importedText
-                        Toast.makeText(context, "Markdown parsed", Toast.LENGTH_SHORT).show()
+                        if (importedText.isBlank()) Toast.makeText(context, "The selected file is empty", Toast.LENGTH_SHORT).show()
+                        else Toast.makeText(context, "Markdown opened", Toast.LENGTH_SHORT).show()
                     }
                 }
             } catch (e: Exception) {
@@ -130,13 +146,27 @@ fun PurplePrintApp(
         }
     }
 
+    val saveMarkdownLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.CreateDocument("text/markdown")
+    ) { uri: Uri? ->
+        if (uri != null) try {
+            context.contentResolver.openOutputStream(uri)?.use { stream ->
+                OutputStreamWriter(stream, Charsets.UTF_8).use { it.write(markdownText) }
+            }
+            Toast.makeText(context, "Markdown saved", Toast.LENGTH_SHORT).show()
+        } catch (e: Exception) {
+            Toast.makeText(context, "Could not save file: ${e.message}", Toast.LENGTH_LONG).show()
+        }
+    }
+
     // PDF Printer Launcher
     val triggerPrint = {
         try {
             val printManager = context.getSystemService(Context.PRINT_SERVICE) as PrintManager
-            val jobName = "PurplePrint Document"
-            val adapter = MarkdownPrintAdapter(context, markdownText, "PurplePrint_Export")
-            printManager.print(jobName, adapter, null)
+            val title = MarkdownParser.parse(markdownText).filterIsInstance<MarkdownBlock.Heading>().firstOrNull()?.text
+                ?.take(60)?.replace(Regex("[^A-Za-z0-9 _-]"), "")?.ifBlank { null } ?: "PurplePrint_Document"
+            val adapter = MarkdownPrintAdapter(context, markdownText, title.replace(' ', '_'))
+            printManager.print(title, adapter, null)
         } catch (e: Exception) {
             Toast.makeText(context, "Failed to initialize print: ${e.message}", Toast.LENGTH_LONG).show()
         }
@@ -177,33 +207,41 @@ fun PurplePrintApp(
                     }
                 },
                 actions = {
-                    IconButton(
-                        onClick = { filePickerLauncher.launch(arrayOf("text/plain", "text/markdown", "*/*")) },
-                        modifier = Modifier.testTag("import_button")
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.UploadFile,
-                            contentDescription = "Import Markdown (.md)"
-                        )
+                    IconButton(onClick = { actionMenuExpanded = true }) {
+                        Icon(Icons.Default.MoreVert, contentDescription = "Document actions")
                     }
-                    IconButton(
-                        onClick = onThemeToggle,
-                        modifier = Modifier.testTag("theme_toggle")
-                    ) {
-                        Icon(
-                            imageVector = if (isDarkTheme) Icons.Default.LightMode else Icons.Default.DarkMode,
-                            contentDescription = "Toggle Theme"
-                        )
-                    }
-                    IconButton(
-                        onClick = { showClearDialog = true },
-                        modifier = Modifier.testTag("clear_button")
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.DeleteSweep,
-                            contentDescription = "Clear Workspace",
-                            tint = Color.Red.copy(alpha = 0.8f)
-                        )
+                    DropdownMenu(expanded = actionMenuExpanded, onDismissRequest = { actionMenuExpanded = false }) {
+                        DropdownMenuItem(text = { Text("Open Markdown") }, leadingIcon = { Icon(Icons.Default.UploadFile, null) }, onClick = {
+                            actionMenuExpanded = false
+                            filePickerLauncher.launch(arrayOf("text/plain", "text/markdown", "text/x-markdown", "*/*"))
+                        }, modifier = Modifier.testTag("import_button"))
+                        DropdownMenuItem(text = { Text("Save Markdown") }, leadingIcon = { Icon(Icons.Default.Save, null) }, onClick = {
+                            actionMenuExpanded = false
+                            saveMarkdownLauncher.launch("${documentTitle(markdownText)}.md")
+                        })
+                        DropdownMenuItem(text = { Text("Share Markdown") }, leadingIcon = { Icon(Icons.Default.Share, null) }, onClick = {
+                            actionMenuExpanded = false
+                            val send = Intent(Intent.ACTION_SEND).setType("text/markdown")
+                                .putExtra(Intent.EXTRA_SUBJECT, documentTitle(markdownText))
+                                .putExtra(Intent.EXTRA_TEXT, markdownText)
+                            context.startActivity(Intent.createChooser(send, "Share Markdown"))
+                        })
+                        DropdownMenuItem(text = { Text(if (isDarkTheme) "Light theme" else "Dark theme") }, leadingIcon = { Icon(if (isDarkTheme) Icons.Default.LightMode else Icons.Default.DarkMode, null) }, onClick = {
+                            actionMenuExpanded = false
+                            onThemeToggle()
+                        }, modifier = Modifier.testTag("theme_toggle"))
+                        DropdownMenuItem(text = { Text("Find in document") }, leadingIcon = { Icon(Icons.Default.Search, null) }, onClick = {
+                            actionMenuExpanded = false
+                            showFindDialog = true
+                        })
+                        DropdownMenuItem(text = { Text("Go to heading") }, leadingIcon = { Icon(Icons.Default.FormatListNumbered, null) }, onClick = {
+                            actionMenuExpanded = false
+                            showHeadingsDialog = true
+                        })
+                        DropdownMenuItem(text = { Text("Clear document") }, leadingIcon = { Icon(Icons.Default.DeleteSweep, null) }, onClick = {
+                            actionMenuExpanded = false
+                            showClearDialog = true
+                        }, modifier = Modifier.testTag("clear_button"))
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
@@ -227,47 +265,17 @@ fun PurplePrintApp(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
-                    // Pulsating active heartbeat dot
-                    val infiniteTransition = rememberInfiniteTransition(label = "heartbeat")
-                    val alphaState by infiniteTransition.animateFloat(
-                        initialValue = 0.3f,
-                        targetValue = 1f,
-                        animationSpec = infiniteRepeatable(
-                            animation = keyframes {
-                                durationMillis = 1200
-                                0.3f at 0
-                                1.0f at 600
-                                0.3f at 1200
-                            },
-                            repeatMode = RepeatMode.Reverse
-                        ),
-                        label = "pulseAlpha"
-                    )
-                    Box(
-                        modifier = Modifier
-                            .size(8.dp)
-                            .alpha(alphaState)
-                            .clip(RoundedCornerShape(4.dp))
-                            .background(Color(0xFF10B981)) // Emerald 500
-                    )
                     Text(
-                        text = "READY FOR EXPORT",
-                        fontSize = 10.sp,
-                        fontWeight = FontWeight.Bold,
+                        text = "${markdownText.trim().split(Regex("\\s+")).count { it.isNotEmpty() }} words · ${markdownText.length} characters",
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Medium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
                         letterSpacing = 1.sp
                     )
                 }
                 
                 // Byte and character counter
-                val bytes = markdownText.toByteArray(Charsets.UTF_8).size
-                Text(
-                    text = "UTF-8 | $bytes BYTES",
-                    fontSize = 11.sp,
-                    fontFamily = FontFamily.Monospace,
-                    fontWeight = FontWeight.Medium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
-                )
+                Text("Saved on this device", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f))
             }
         },
         floatingActionButton = {
@@ -302,10 +310,10 @@ fun PurplePrintApp(
                             .fillMaxHeight()
                             .border(width = 0.5.dp, color = MaterialTheme.colorScheme.outline)
                     ) {
-                        EditorPane(
-                            text = markdownText,
-                            onTextChange = { markdownText = it }
-                        )
+                        Column {
+                            FormattingToolbar(onInsert = { markdownText = insertAtEnd(markdownText, it) }, onFind = { showFindDialog = true })
+                            EditorPane(text = markdownText, onTextChange = { markdownText = it }, search = findText, findSelection = findSelection)
+                        }
                     }
                     Box(
                         modifier = Modifier
@@ -341,10 +349,10 @@ fun PurplePrintApp(
 
                     Box(modifier = Modifier.fillMaxSize().weight(1f)) {
                         if (activeTab == 0) {
-                            EditorPane(
-                                text = markdownText,
-                                onTextChange = { markdownText = it }
-                            )
+                            Column {
+                                FormattingToolbar(onInsert = { markdownText = insertAtEnd(markdownText, it) }, onFind = { showFindDialog = true })
+                                EditorPane(text = markdownText, onTextChange = { markdownText = it }, search = findText, findSelection = findSelection)
+                            }
                         } else {
                             MarkdownPreview(text = markdownText)
                         }
@@ -352,6 +360,58 @@ fun PurplePrintApp(
                 }
             }
         }
+    }
+
+    if (showFindDialog) {
+        AlertDialog(
+            onDismissRequest = { showFindDialog = false },
+            title = { Text("Find in document") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedTextField(value = findText, onValueChange = { findText = it }, label = { Text("Search text") }, singleLine = true)
+                    Text(if (findText.isBlank()) "Enter a word or phrase" else "${Regex(Regex.escape(findText), RegexOption.IGNORE_CASE).findAll(markdownText).count()} matches")
+                }
+            },
+            confirmButton = {
+                Row {
+                    TextButton(onClick = {
+                        if (findText.isNotBlank()) {
+                            val next = markdownText.indexOf(findText, (findSelection ?: -1) + 1, ignoreCase = true)
+                                .takeIf { it >= 0 } ?: markdownText.indexOf(findText, ignoreCase = true)
+                            findSelection = next.takeIf { it >= 0 }
+                            activeTab = 0
+                        }
+                    }) { Text("Next match") }
+                    TextButton(onClick = { showFindDialog = false }) { Text("Done") }
+                }
+            }
+        )
+    }
+
+    if (showHeadingsDialog) {
+        val headings = remember(markdownText) { MarkdownParser.parse(markdownText).filterIsInstance<MarkdownBlock.Heading>() }
+        AlertDialog(
+            onDismissRequest = { showHeadingsDialog = false },
+            title = { Text("Go to heading") },
+            text = {
+                if (headings.isEmpty()) Text("Add a Markdown heading to navigate this document.")
+                else Column(Modifier.heightIn(max = 360.dp).verticalScroll(rememberScrollState())) {
+                    headings.forEach { heading ->
+                        TextButton(
+                            onClick = {
+                                findText = heading.text
+                                findSelection = markdownText.indexOf(heading.text).takeIf { it >= 0 }
+                                activeTab = 0
+                                showHeadingsDialog = false
+                            },
+                            modifier = Modifier.fillMaxWidth(),
+                            contentPadding = PaddingValues(start = (12 + heading.level * 12).dp, end = 8.dp)
+                        ) { Text(heading.text, modifier = Modifier.fillMaxWidth()) }
+                    }
+                }
+            },
+            confirmButton = { TextButton(onClick = { showHeadingsDialog = false }) { Text("Close") } }
+        )
     }
 
     // Verify clear Workspace text Dialog
@@ -426,12 +486,46 @@ fun TabHeader(
     }
 }
 
+private fun documentTitle(markdown: String): String = MarkdownParser.parse(markdown)
+    .filterIsInstance<MarkdownBlock.Heading>().firstOrNull()?.text
+    ?.take(60)?.replace(Regex("[^A-Za-z0-9 _-]"), "")?.ifBlank { null } ?: "Untitled"
+
+private fun insertAtEnd(current: String, snippet: String): String =
+    current + (if (current.isNotEmpty() && !current.endsWith("\n")) "\n" else "") + snippet
+
+@Composable
+private fun FormattingToolbar(onInsert: (String) -> Unit, onFind: () -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).background(MaterialTheme.colorScheme.surface).padding(horizontal = 8.dp, vertical = 4.dp),
+        horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically
+    ) {
+        listOf("H" to "## Heading", "B" to "**bold**", "I" to "*italic*", "List" to "- List item", "Quote" to "> Quote", "Code" to "```\ncode\n```").forEach { (label, snippet) ->
+            TextButton(onClick = { onInsert(snippet) }, contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)) { Text(label) }
+        }
+        IconButton(onClick = onFind, modifier = Modifier.size(36.dp)) { Icon(Icons.Default.Search, "Find") }
+    }
+}
+
 @Composable
 fun EditorPane(
     text: String,
-    onTextChange: (String) -> Unit
+    onTextChange: (String) -> Unit,
+    search: String = "",
+    findSelection: Int? = null
 ) {
     val scrollState = rememberScrollState()
+    val focusRequester = remember { FocusRequester() }
+    var editorValue by remember { mutableStateOf(TextFieldValue(text)) }
+    LaunchedEffect(text) {
+        if (editorValue.text != text) editorValue = editorValue.copy(text = text, selection = TextRange(text.length))
+    }
+    LaunchedEffect(findSelection) {
+        val start = findSelection
+        if (start != null && start >= 0 && start + search.length <= editorValue.text.length) {
+            editorValue = editorValue.copy(selection = TextRange(start, start + search.length))
+            runCatching { focusRequester.requestFocus() }
+        }
+    }
     val lines = remember(text) { text.split("\n") }
     val lineCount = lines.size.coerceAtLeast(1)
 
@@ -442,10 +536,14 @@ fun EditorPane(
     )
 
     CompositionLocalProvider(LocalTextSelectionColors provides customTextSelectionColors) {
+        Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surface)) {
+        if (search.isNotBlank()) {
+            val count = remember(text, search) { Regex(Regex.escape(search), RegexOption.IGNORE_CASE).findAll(text).count() }
+            Text("$count matches for ‘$search’", Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.secondaryContainer).padding(horizontal = 12.dp, vertical = 6.dp), style = MaterialTheme.typography.labelMedium)
+        }
         Row(
             modifier = Modifier
-                .fillMaxSize()
-                .background(MaterialTheme.colorScheme.surface)
+                .fillMaxWidth().weight(1f)
                 .verticalScroll(scrollState)
         ) {
             // Lines index sidebar - monospace numbers aligned perfectly with markdown input field lines
@@ -472,8 +570,8 @@ fun EditorPane(
 
             // Raw input textfield
             BasicTextField(
-                value = text,
-                onValueChange = onTextChange,
+                value = editorValue,
+                onValueChange = { editorValue = it; onTextChange(it.text) },
                 textStyle = TextStyle(
                     fontFamily = FontFamily.Monospace,
                     fontSize = 12.sp,
@@ -484,6 +582,7 @@ fun EditorPane(
                     .weight(1f)
                     .padding(top = 16.dp, bottom = 16.dp, start = 14.dp, end = 16.dp)
                     .fillMaxHeight()
+                    .focusRequester(focusRequester)
                     .testTag("markdown_editor"),
                 cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
                 keyboardOptions = KeyboardOptions(
@@ -491,6 +590,7 @@ fun EditorPane(
                     autoCorrectEnabled = false
                 )
             )
+        }
         }
     }
 }
@@ -589,7 +689,7 @@ fun MarkdownPreview(
                                 .testTag("list_item")
                         ) {
                             Text(
-                                text = if (block.ordered) "${block.index}." else "*",
+                                text = block.checked?.let { if (it) "☑" else "□" } ?: if (block.ordered) "${block.index}." else "•",
                                 style = MaterialTheme.typography.bodyLarge,
                                 color = MaterialTheme.colorScheme.primary,
                                 fontWeight = FontWeight.Bold,
@@ -650,37 +750,30 @@ fun MarkdownParagraph(
     text: String,
     modifier: Modifier = Modifier
 ) {
+    val linkColor = MaterialTheme.colorScheme.primary
     val annotatedString = remember(text) {
         buildAnnotatedString {
-            val pattern = Regex("(\\*\\*.*?\\*\\*|\\*.*?\\*|`.*?`|[^*`]+)")
-            val matches = pattern.findAll(text)
-            for (match in matches) {
+            val pattern = Regex("(\\*\\*.+?\\*\\*|__.+?__|\\*[^*]+\\*|_[^_]+_|`[^`]+`|\\[[^]]+\\]\\([^ )]+\\))")
+            var cursor = 0
+            for (match in pattern.findAll(text)) {
+                append(text.substring(cursor, match.range.first))
                 val raw = match.value
                 when {
-                    raw.startsWith("**") && raw.endsWith("**") && raw.length >= 4 -> {
-                        withStyle(style = SpanStyle(fontWeight = FontWeight.Bold)) {
-                            append(raw.substring(2, raw.length - 2))
-                        }
+                    (raw.startsWith("**") && raw.endsWith("**")) || (raw.startsWith("__") && raw.endsWith("__")) ->
+                        withStyle(SpanStyle(fontWeight = FontWeight.Bold)) { append(raw.substring(2, raw.length - 2)) }
+                    raw.startsWith("*") || raw.startsWith("_") ->
+                        withStyle(SpanStyle(fontStyle = FontStyle.Italic)) { append(raw.substring(1, raw.length - 1)) }
+                    raw.startsWith("`") -> withStyle(SpanStyle(fontFamily = FontFamily.Monospace, color = Color(0xFFA855F7), background = Color(0xFF1E293B).copy(alpha = 0.8f))) {
+                        append(" ${raw.substring(1, raw.length - 1)} ")
                     }
-                    raw.startsWith("*") && raw.endsWith("*") && raw.length >= 2 -> {
-                        withStyle(style = SpanStyle(fontStyle = FontStyle.Italic)) {
-                            append(raw.substring(1, raw.length - 1))
-                        }
-                    }
-                    raw.startsWith("`") && raw.endsWith("`") && raw.length >= 2 -> {
-                        withStyle(style = SpanStyle(
-                            fontFamily = FontFamily.Monospace,
-                            color = Color(0xFFA855F7), // Amethyst purple fallback tint for preview text inline code
-                            background = Color(0xFF1E293B).copy(alpha = 0.8f)
-                        )) {
-                            append(" " + raw.substring(1, raw.length - 1) + " ")
-                        }
-                    }
-                    else -> {
-                        append(raw)
+                    raw.startsWith("[") -> {
+                        val label = raw.substringAfter('[').substringBefore(']')
+                        withStyle(SpanStyle(color = linkColor, textDecoration = androidx.compose.ui.text.style.TextDecoration.Underline)) { append(label) }
                     }
                 }
+                cursor = match.range.last + 1
             }
+            append(text.substring(cursor))
         }
     }
 
