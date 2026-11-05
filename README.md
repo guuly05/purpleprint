@@ -9,6 +9,10 @@ PurplePrint is an offline-first Android Markdown editor and PDF exporter. It let
 * **Native PDF export:** Generates print-ready documents through Android `PrintManager` and `PdfDocument`.
 * **Private by design:** No internet permission, no cloud conversion, no AI service dependency, and Android backup is disabled.
 * **Material 3 interface:** A polished high-contrast interface with dark/light theme support.
+* **Local draft recovery:** Drafts are saved on-device as you type and restored when the app reopens.
+* **Markdown file workflows:** Import, save, and share Markdown using Android's document and share pickers.
+* **Writing tools:** Formatting shortcuts, word and character counts, search, and heading navigation.
+* **Expanded Markdown blocks:** Multiline paragraphs, task lists, fenced code, quotes, and common list styles.
 
 ## Screenshots
 
@@ -85,6 +89,8 @@ When the user edits the document, `MarkdownParser.kt` processes the raw string l
 
 * It classifies structural elements (Headings, Paragraphs, List Items, Block Quotes, Code Blocks, and Horizontal Rules).
 * It generates an AST list of `MarkdownBlock` items.
+* Adjacent text lines are joined into paragraphs; task lists, `+` bullets, and `1)` ordered lists are recognized.
+* Unclosed code fences are preserved as code instead of dropping document text.
 * `MarkdownInlineParser.kt` extracts inline styling such as bold, italic, and inline code spans.
 
 ### PDF Layout
